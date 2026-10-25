@@ -1,0 +1,262 @@
+{
+  "name": "GRC Compliance Automation",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "45f356e7-0b7d-41d1-ab89-85ec4c62a12a",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/controls",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        -272
+      ],
+      "id": "a45f314e-be40-4bb1-8037-f9f6e4b79650",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/evidence",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        -96
+      ],
+      "id": "cf4f5330-c618-4446-af48-a37b43488676",
+      "name": "HTTP Request1",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/exceptions",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        80
+      ],
+      "id": "8d4f3e13-c2e6-4579-97dc-6df28984a465",
+      "name": "HTTP Request2",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/dashboard-summary",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        272
+      ],
+      "id": "2c6dc41d-2c51-48c0-b653-e76151b29c7e",
+      "name": "HTTP Request3",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "ab7e2fac-f712-499a-aef1-0f6293ff9b92",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const exceptions = $input.all().map(item => item.json);\n\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\n\nconst overdueItems = exceptions.filter(item => {\n  if (!item.remediation_due_date) return false;\n\n  const dueDate = new Date(item.remediation_due_date);\n  if (Number.isNaN(dueDate.getTime())) return false;\n\n  dueDate.setHours(0, 0, 0, 0);\n\n  return (\n    dueDate < today &&\n    item.remediation_status !== \"Closed\"\n  );\n});\n\nreturn [{\n  json: {\n    total_exceptions: exceptions.length,\n    overdue_remediations: overdueItems.length,\n    overdue_high_risk: overdueItems.filter(\n      item => item.risk_severity === \"High\"\n    ).length,\n    overdue_items: overdueItems.map(item => ({\n      control_code: item.control_code,\n      risk_severity: item.risk_severity,\n      remediation_owner: item.remediation_owner,\n      remediation_due_date: item.remediation_due_date,\n      remediation_status: item.remediation_status\n    }))\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        400
+      ],
+      "id": "2fce528a-76c4-4e71-aaf0-b6b68c467798",
+      "name": "Overdue Remediation Check"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(item => item.json);\n\nconst controls = items.filter(item =>\n  item.control_code && item.control_description\n);\n\nconst evidence = items.filter(item =>\n  item.evidence_name !== undefined\n);\n\nconst exceptions = items.filter(item =>\n  item.risk_severity !== undefined\n);\n\nconst summary = items.find(item =>\n  item.total_controls !== undefined\n);\n\nconst evidenceCodes = new Set(\n  evidence.map(item => item.control_code)\n);\n\nconst results = controls.map(control => {\n  const matchingEvidence = evidence.filter(\n    item => item.control_code === control.control_code\n  );\n\n  let status = \"Missing Evidence\";\n\n  if (matchingEvidence.length > 0) {\n    const validEvidence = matchingEvidence.some(\n      item =>\n        item.evidence_status === \"Submitted\" &&\n        item.evidence_quality === \"Valid\"\n    );\n\n    status = validEvidence ? \"PASS\" : \"FAIL\";\n  }\n\n  return {\n    json: {\n      control_code: control.control_code,\n      control_description: control.control_description,\n      compliance_status: status,\n      evidence_count: matchingEvidence.length\n    }\n  };\n});\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        32
+      ],
+      "id": "59157396-33e8-451c-a2ef-abeb62f66221",
+      "name": "Control Compliance Evaluation"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(item => item.json);\n\nconst totalControls = rows.length;\n\nconst passed = rows.filter(\n  item => item.compliance_status === \"PASS\"\n).length;\n\nconst failed = rows.filter(\n  item => item.compliance_status === \"FAIL\"\n).length;\n\nconst missingEvidence = rows.filter(\n  item => item.compliance_status === \"Missing Evidence\"\n).length;\n\nconst compliancePercentage = totalControls > 0\n  ? Number(((passed / totalControls) * 100).toFixed(2))\n  : 0;\n\nreturn [{\n  json: {\n    total_controls: totalControls,\n    passed_controls: passed,\n    failed_controls: failed,\n    missing_evidence: missingEvidence,\n    compliance_percentage: compliancePercentage\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        32
+      ],
+      "id": "ca2a1ac7-bcf0-4b95-b734-ad46934554cf",
+      "name": "Compliance Summary"
+    },
+    {
+      "parameters": {
+        "jsCode": "const exceptions = $input.all().map(item => item.json);\n\nconst openItems = exceptions.filter(\n  item => item.remediation_status === \"Open\"\n);\n\nconst severityCounts = {\n  High: openItems.filter(item => item.risk_severity === \"High\").length,\n  Medium: openItems.filter(item => item.risk_severity === \"Medium\").length,\n  Low: openItems.filter(item => item.risk_severity === \"Low\").length\n};\n\nreturn [{\n  json: {\n    total_exceptions: exceptions.length,\n    open_remediations: openItems.length,\n    high_risk_open: severityCounts.High,\n    medium_risk_open: severityCounts.Medium,\n    low_risk_open: severityCounts.Low,\n    remediation_owners: [...new Set(\n      openItems.map(item => item.remediation_owner).filter(Boolean)\n    )]\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        240
+      ],
+      "id": "5ab0ff9e-8c8a-46b4-9fe6-d6df9db2b2de",
+      "name": "Remediation Summary"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          },
+          {
+            "node": "Remediation Summary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Overdue Remediation Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Control Compliance Evaluation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Control Compliance Evaluation": {
+      "main": [
+        [
+          {
+            "node": "Compliance Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compliance Summary": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "cf00db4c-262e-46f5-941d-5a2674bad961",
+  "meta": {
+    "instanceId": "a9d7a4a1da1f683dd4201ba8f547a217e55e454f286f1508210785b9c03dd571"
+  },
+  "nodeGroups": [],
+  "id": "3rmmTCgyryUk51Jj",
+  "tags": []
+}
